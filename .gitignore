@@ -1,0 +1,6 @@
+.venv/
+.nltk_cache/
+data/
+model/
+img/
+*__pycache__
