@@ -15,7 +15,7 @@ from gensim import models
 from utilities.eda import *
 from utilities.preprocessing import preprocess_texts_eng
 from utilities.topic_modelling import (
-    get_coherence_models,
+    grid_coherence_models,
     grid_search_lsi,
     prepare_corpus,
     prepare_output,
@@ -60,7 +60,7 @@ if __name__ == "__main__":
 
         logger.info("Running EDA")
         # Check what delimiter is used in the file - open the file with a Notebook to check
-        data_raw = pd.read_csv(DATA_PATH / IN_FILE, sep=",").iloc[:1000]
+        data_raw = pd.read_csv(DATA_PATH / IN_FILE, sep=",")
         logger.info(f"Data loaded from {str(DATA_PATH / IN_FILE)}.")
         logger.info(f"Data shape: {data_raw.shape}")
 
@@ -103,12 +103,12 @@ if __name__ == "__main__":
         # Plot to investigate data distribution by the review length
         plot_distribution_review_lengths(df=data_raw, img_path=IMG_PATH)
 
-    if steps.preprocess:
+    if True:
         #############################
         # Part 2 - Text preprocessing
         #############################
 
-        data_raw = pd.read_csv(DATA_PATH / IN_FILE, sep=",").iloc[:1000]
+        data_raw = pd.read_csv(DATA_PATH / IN_FILE, sep=",")
         logger.info(f"Data loaded from {str(DATA_PATH / IN_FILE)}.")
 
         # Run the wrapper function to preprocess the text in the ReviewText column
@@ -117,6 +117,7 @@ if __name__ == "__main__":
             text_col="ReviewText",
             shuffle=True,
             train_subset=1,
+            workers=4,
         )
         # Create a dictionary and a corpus
         dictionary, corpus = prepare_corpus(
@@ -141,7 +142,7 @@ if __name__ == "__main__":
         # Part 3 - Model building and estimation
         ########################################
 
-        data_raw = pd.read_csv(DATA_PATH / IN_FILE, sep=",").iloc[:1000]
+        data_raw = pd.read_csv(DATA_PATH / IN_FILE, sep=",")
         logger.info(f"Raw data loaded from {str(DATA_PATH / IN_FILE)}.")
 
         data_processed = pd.read_csv(DATA_PATH / PROCESSED_FILE, sep=",")
@@ -169,10 +170,11 @@ if __name__ == "__main__":
             dictionary=dictionary,
             num_topics_list=num_topics_list,
             chunksize_list=chunksize_list,
+            workers=6,
         )
 
         # Evaluate LSI models using Coherence score
-        sorted_models = get_coherence_models(
+        sorted_models = grid_coherence_models(
             models_grid_search=models_grid_search_lsi,
             tokens=data_processed["tokens"],
             dictionary=dictionary,

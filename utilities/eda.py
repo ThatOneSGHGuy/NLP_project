@@ -25,6 +25,7 @@ def low_count_describe(
     Returns:
         None: Prints the unique value counts for columns with low unique value counts along with the unique values.
     """
+
     df = df.copy(deep=True)
     low_cols = df.nunique()[df.nunique() <= low_count_threshold].index.values
 

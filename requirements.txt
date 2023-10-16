@@ -7,3 +7,4 @@ matplotlib~=3.8.0
 loguru~=0.7.2
 langdetect~=1.0.9
 tqdm~=4.64.0
+pandarallel~=1.6.5

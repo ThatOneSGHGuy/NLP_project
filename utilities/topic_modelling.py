@@ -2,8 +2,9 @@
 # Wrapper functions and functions for building the topic modelling model
 ########################################################################
 
-
+from functools import partial
 from typing import List, Tuple, Dict, Iterable, Union, Any
+import multiprocessing
 
 import gensim
 import pandas as pd
@@ -11,12 +12,11 @@ from gensim import corpora, models
 
 
 def prepare_corpus(
-    doc_clean: Iterable[str],
-    min_doc_frequency: int,
-    max_doc_frequency: float,
-    max_terms: int,
+        doc_clean: Iterable[str],
+        min_doc_frequency: int,
+        max_doc_frequency: float,
+        max_terms: int,
 ) -> tuple[corpora.Dictionary, List[Union[Tuple[List[Tuple[int, int]], Dict[Any, int]], List[Tuple[int, int]]]]]:
-
     """
     Create a term dictionary for the cleaned document tokens and convert them into a Document Term Matrix.
 
@@ -52,8 +52,9 @@ def grid_search_lsi(
         dictionary: corpora.Dictionary,
         num_topics_list: List[int],
         chunksize_list: List[int],
-) -> Dict[str, models.LsiModel]:
-
+        workers: int = 1,
+        **kwargs,
+) -> List[Dict[str, models.LsiModel]]:
     """
     Perform grid search for LSI models with different hyperparameters.
 
@@ -62,6 +63,7 @@ def grid_search_lsi(
         dictionary (corpora.Dictionary): The term dictionary for the corpus.
         num_topics_list (list of int): List of candidate numbers of topics.
         chunksize_list (list of int): List of candidate chunk sizes.
+        workers (int): Number of CPUs to use in the grid search.
 
     Returns:
         model_dict (dict): A dictionary mapping model names to LSI models.
@@ -69,31 +71,77 @@ def grid_search_lsi(
 
     # Container for models
     model_dict = {}
+    param_grid = [({'chunksize': chunksize}, {'num_topics': num_topics})
+                  for chunksize in chunksize_list
+                  for num_topics in num_topics_list]
+    fixed_params = dict(
+        corpus=corpus_tfidf,
+        id2word=dictionary,
+        **kwargs,
+    )
 
-    for num_topics in num_topics_list:
-        for chunksize in chunksize_list:
-            model_name = f'lsi_model_{num_topics}_{chunksize}'
-            print(f"Estimating model: {model_name}...")
-            lsi_model = models.LsiModel(
-                corpus=corpus_tfidf,
-                id2word=dictionary,
-                num_topics=num_topics,
-                chunksize=chunksize,
-                onepass=False,
+    if workers == 1:
+        for params in param_grid:
+            model_dict.update(
+                get_model_lsi(params, **fixed_params),
             )
-            model_dict[model_name] = lsi_model
+    else:
+        # Create a pool of processes for parallel execution
+        with multiprocessing.Pool(processes=workers) as Pool:
+            results = list(Pool.map(
+                partial(get_model_lsi, **fixed_params),
+                param_grid,
+            ))
+
+        model_dict = {key: value for d in results for key, value in d.items()}
 
     return model_dict
 
 
-def get_coherence_models(
-        models_grid_search: dict[str, models.LsiModel],
+def get_model_lsi(
+        params,
+        **kwargs,
+) -> Dict:
+    """
+    Create and return Latent Semantic Indexing (LSI) model.
+
+    Args:
+        params (list of dicts): Dicionary of parameters containing number of topics and chunksize
+            which are subject to tuning.
+
+    Returns:
+        Dict: A dictionary containing the LSI models with their associated names as keys.
+    """
+
+    params = {key: value for d in params for key, value in d.items()}
+    model_dict = {}
+
+    num_topics = params.get('num_topics')
+    chunksize = params.get('chunksize')
+
+    model_name = f'lsi_model_{num_topics}_{chunksize}'
+    print(f"Estimating model: {model_name}...")
+
+    lsi_model = models.LsiModel(
+        num_topics=num_topics,
+        chunksize=chunksize,
+        onepass=False,
+        **kwargs,
+    )
+
+    model_dict[model_name] = lsi_model
+
+    return model_dict
+
+
+def grid_coherence_models(
+        models_grid_search: Dict[str, models.LsiModel],
         tokens: Iterable[str],
         dictionary: corpora.Dictionary,
-):
-
+        **kwargs,
+) -> Dict[str, float]:
     """
-    Sort a list of topic modelling models by their Coherence scores in descending order.
+    Calculate Coherence scores for each topic modelling model and sort them in descending order wrt. Coherence score.
 
     Args:
         models_grid_search (dictionary of gensim.models.LsiModel): Dictionary of models.
@@ -107,26 +155,56 @@ def get_coherence_models(
     # Initialize an empty dictionary to store Coherence scores for each model
     coherence_scores = {}
 
+    fixed_params = dict(
+        texts=tokens,
+        dictionary=dictionary,
+        coherence='c_v',
+        **kwargs,
+    )
     # Loop through the models and calculate their Coherence scores
-    for model_name in models_grid_search:
-
-        coherence_model = models.CoherenceModel(
-            model=models_grid_search[model_name],
-            texts=tokens,
-            dictionary=dictionary,
-            coherence='c_v',
+    for model in models_grid_search.items():
+        coherence_scores.update(
+            get_coherence_model(model_dict=model, **fixed_params),
         )
-        coherence_score = coherence_model.get_coherence()
-        coherence_scores[model_name] = coherence_score
 
     # Sort the models by Coherence score in descending order
-    sorted_models = sorted(coherence_scores.items(), key=lambda x: x[1], reverse=True)
+    sorted_models = {k: v for k, v in sorted(coherence_scores.items(), key=lambda item: item[1], reverse=True)}
 
     # Print the coherence score for each model
-    for model_name, coherence_score in sorted_models:
+    for model_name, coherence_score in sorted_models.items():
         print(f'Model: {model_name}, Coherence Score: {coherence_score}')
 
     return sorted_models
+
+
+def get_coherence_model(
+        model_dict: Tuple[str, models.LsiModel],
+        **kwargs
+) -> Dict[str, float]:
+    """
+    Calculate Coherence score for a given LSI model.
+
+    Args:
+        model_dict (tuple of dicts): Tuple containing LSI model name and the model itself.
+
+    Returns:
+        Dict: A dictionary containing Coherence scores with the associated model names as keys.
+    """
+
+    # Unpack the tuple
+    model_name = model_dict[0]
+    model = model_dict[1]
+
+    # Create Coherence model
+    coherence_model = models.CoherenceModel(
+        model=model,
+        **kwargs,
+    )
+
+    # Get the Coherence score
+    coherence_score = {model_name: coherence_model.get_coherence()}
+
+    return coherence_score
 
 
 def prepare_output(
@@ -134,7 +212,6 @@ def prepare_output(
         dictionary: corpora.Dictionary,
         model_estimated: Union[models.ldamulticore.LdaMulticore, models.LsiModel, models.ldamodel.LdaModel],
 ):
-
     """
     Assign topics to text data based on a given LSI or LDA model.
 
@@ -150,7 +227,7 @@ def prepare_output(
     df = df.copy(deep=True)
 
     def classify_title(
-            tokens
+            tokens: Iterable[str],
     ):
         """
         Classify a list of tokens into a topic using the provided LSI or LDA model.

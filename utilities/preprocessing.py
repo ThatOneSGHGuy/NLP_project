@@ -3,22 +3,21 @@
 ########################################
 
 import re
-import unicodedata
 
 import pandas as pd
+import unicodedata
 from langdetect import detect
 from loguru import logger
 from nltk import pos_tag
 from nltk.corpus import stopwords, wordnet
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
-from tqdm import tqdm
+from pandarallel import pandarallel
 
 
 def get_wordnet_pos_func(
         word: str,
 ) -> str:
-
     """
     Maps the respective POS tag of a word to the format accepted by the lemmatizer of wordnet
 
@@ -28,6 +27,7 @@ def get_wordnet_pos_func(
     Returns:
         POS tag, readable for the lemmatizer of wordnet
     """
+
     tag = pos_tag([word])[0][1][0].upper()
     tag_dict = {"J": wordnet.ADJ,
                 "N": wordnet.NOUN,
@@ -40,7 +40,6 @@ def get_wordnet_pos_func(
 def norm_lemm_POS_tag(
         text: str,
 ) -> str:
-
     """
     Lemmatize tokens from string
 
@@ -54,6 +53,7 @@ def norm_lemm_POS_tag(
     Returns:
         String with lemmatized words
     """
+
     words = word_tokenize(text)
     text = ' '.join([WordNetLemmatizer().lemmatize(word, get_wordnet_pos_func(word)) for word in words])
     return text
@@ -62,7 +62,6 @@ def norm_lemm_POS_tag(
 def remove_accented_chars(
         text: str,
 ) -> str:
-
     """
     Removes all accented characters from a string, if present
 
@@ -72,13 +71,13 @@ def remove_accented_chars(
     Returns:
         Clean string without accented characters
     """
+
     return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8', 'ignore')
 
 
 def remove_extra_whitespaces(
         text: str,
 ) -> str:
-
     """
     Removes extra whitespaces from a string, if present
 
@@ -88,13 +87,13 @@ def remove_extra_whitespaces(
     Returns:
         Clean string without extra whitespaces
     """
+
     return re.sub(r'^\s*|\s+', ' ', text).strip()
 
 
 def is_english(
         text: str,
 ) -> bool:
-
     """
     Checks if a text is in English using language detection.
 
@@ -104,6 +103,7 @@ def is_english(
     Returns:
         bool: True if the text is in English, False otherwise.
     """
+
     try:
         return detect(text) == 'en'
     except:
@@ -115,7 +115,6 @@ def remove_short_text(
         text_col: str,
         threshold: int,
 ) -> pd.Series:
-
     """
     Removes short text observations from a DataFrame based on a word count threshold.
 
@@ -143,7 +142,6 @@ def remove_short_text(
 def preprocess_text(
         text: str,
 ) -> str:
-
     """
     Preprocesses a text by lowercasing, removing extra whitespaces, tokenizing,
     removing stopwords, removing punctuations, and lemmatizing.
@@ -179,8 +177,8 @@ def preprocess_texts_eng(
         text_col: str,
         shuffle: bool,
         train_subset: float = 1,
+        workers: int = 1,
 ) -> pd.DataFrame:
-
     """
     Preprocesses a DataFrame containing text data by removing short texts, optionally shuffling the data,
     filtering by language, and tokenizing the text.
@@ -190,13 +188,14 @@ def preprocess_texts_eng(
         text_col (str): The name of the column in df_raw that contains the text data.
         shuffle (bool): Whether to shuffle the data.
         train_subset (float, optional): Fraction of the data to keep, a value between 0 and 1.
+        workers (int): Number of CPUs to use in the text preprocessing.
 
     Returns:
         pd.DataFrame: The preprocessed DataFrame with an added 'tokens' column containing tokenized text.
     """
 
     # Enable progress bar
-    tqdm.pandas()
+    pandarallel.initialize(nb_workers=workers, progress_bar=True)
 
     # Create a new df
     data_processed = df.copy(deep=True)
@@ -215,12 +214,12 @@ def preprocess_texts_eng(
     # Remove any non-English observations
     logger.info("Removing non-English observations")
     non_english_reviews_count = data_processed.shape[0]
-    data_processed = data_processed[data_processed[text_col].progress_apply(is_english)]
+    data_processed = data_processed[data_processed[text_col].parallel_apply(is_english)]
     non_english_reviews_count = non_english_reviews_count - data_processed.shape[0]
     logger.info(f"Number of non-English observations: {non_english_reviews_count}")
 
     # Tokenize and preprocess the text
     logger.info("Processing text - lemmatization, stop-words removal, punctuation removal and others")
-    data_processed["tokens"] = data_processed[text_col].progress_apply(preprocess_text)
+    data_processed["tokens"] = data_processed[text_col].parallel_apply(preprocess_text)
 
     return data_processed
