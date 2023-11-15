@@ -9,4 +9,4 @@ There are 3 steps in this project:
 
 2. Preprocessing - The first part of preprocessing focuses on removing short texts, optionally shuffling the data, filtering by language, and tokenizing the text. Second part prepares a corpus from the already-cleaned text and exports the corpus (and a dictionary) to an external file.
 
-3. Modelling - In this section TF-IDF corpus model is prepared and fed into LSI and LDA models. Additionally, for LSI grid search is performed. Both models are evaluated based on Coherence score. At the end, final model is chosen along with the predictions and the results are exported into an external file.
+3. Modelling - In this section TF-IDF corpus model is prepared and fed into LSI and LDA models. Additionally, for LSI model, grid search is performed. Both models are evaluated based on Coherence score. At the end, final model is chosen along with the predictions and the results are exported into an external file.
